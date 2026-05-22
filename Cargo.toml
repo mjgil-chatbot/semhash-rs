@@ -1,0 +1,23 @@
+[package]
+name = "semhash-rs"
+version = "0.4.1"
+edition = "2021"
+authors = ["Port generated for MinishLab/semhash API compatibility"]
+description = "Strict Rust port of SemHash: semantic deduplication, outlier filtering, and representative sampling."
+license = "ISC"
+repository = "https://github.com/MinishLab/semhash"
+readme = "README.md"
+keywords = ["semhash", "deduplication", "embeddings", "similarity", "rust"]
+categories = ["algorithms", "science", "text-processing"]
+
+[lib]
+name = "semhash_rs"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Reserved for wiring the default Python model behavior to model2vec-rs in downstream forks.
+model2vec = []
+
+[dependencies]
+rayon = "1.10"
