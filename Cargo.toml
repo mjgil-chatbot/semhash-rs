@@ -20,4 +20,5 @@ default = []
 model2vec = []
 
 [dependencies]
+ndarray = "0.16"
 rayon = "1.10"

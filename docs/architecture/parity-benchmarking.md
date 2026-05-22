@@ -18,6 +18,7 @@ This repository now carries a dedicated cross-repo parity harness for the upstre
 - Exact-search queries in `src/index.rs` are parallelized with `rayon` at the query level.
 - Top-k retrieval now trims to the requested prefix before sorting it, instead of fully sorting every candidate list.
 - Ranking-based outlier and representative flows now use a mean-top-k similarity path, avoiding neighbor-id materialization when only aggregate scores are needed.
+- Exact-search scoring now batches normalized query rows against a normalized corpus matrix using `ndarray` matrix multiplication instead of scalar per-pair cosine loops.
 
 ## Benchmark Design
 

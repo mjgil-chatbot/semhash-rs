@@ -1,5 +1,6 @@
 use crate::error::{Result, SemHashError};
-use crate::utils::{cosine_similarity, validate_embeddings_shape, DictRecord, Embeddings};
+use crate::utils::{normalize, validate_embeddings_shape, DictRecord, Embeddings};
+use ndarray::{linalg::general_mat_mul, Array2, ArrayView2};
 use rayon::prelude::*;
 
 /// Backend selector matching the Python `ann_backend` parameter.
@@ -31,11 +32,13 @@ pub struct Index {
     pub vectors: Embeddings,
     pub items: Vec<Vec<DictRecord>>,
     pub backend: Backend,
+    normalized_vectors: Vec<f32>,
+    dimensions: usize,
 }
 
 impl Index {
     pub fn new(vectors: Embeddings, items: Vec<Vec<DictRecord>>, backend: Backend) -> Result<Self> {
-        validate_embeddings_shape(&vectors, items.len(), None)?;
+        let dimensions = validate_embeddings_shape(&vectors, items.len(), None)?;
         if vectors.len() != items.len() {
             return Err(SemHashError::InvalidEmbeddings(format!(
                 "Number of vectors ({}) must match number of items ({})",
@@ -43,10 +46,13 @@ impl Index {
                 items.len()
             )));
         }
+
         Ok(Self {
+            normalized_vectors: flatten_normalized_vectors(&vectors, dimensions),
             vectors,
             items,
             backend,
+            dimensions,
         })
     }
 
@@ -64,32 +70,23 @@ impl Index {
     /// Python Vicinity returns distances and SemHash converts them back with
     /// `1 - distance`. This exact backend directly computes cosine similarity.
     pub fn query_threshold(&self, vectors: &Embeddings, threshold: f32) -> Result<Vec<DocScores>> {
-        if self.vectors.is_empty() {
-            return Ok(vec![Vec::new(); vectors.len()]);
-        }
-        validate_query_dims(vectors, self.vectors[0].len())?;
+        self.similarity_batches(vectors, |_, row| {
+            let mut neighbors: Vec<(usize, f32)> = row
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, similarity)| *similarity >= threshold)
+                .collect();
+            trim_top_k(&mut neighbors, 100);
 
-        Ok(vectors
-            .par_iter()
-            .map(|query| {
-                let mut neighbors: Vec<(usize, f32)> = self
-                    .vectors
-                    .iter()
-                    .enumerate()
-                    .map(|(index, vector)| (index, cosine_similarity(query, vector)))
-                    .filter(|(_, similarity)| *similarity >= threshold)
-                    .collect();
-                trim_top_k(&mut neighbors, 100);
-
-                let mut intermediate = Vec::new();
-                for (index, similarity) in neighbors {
-                    for record in &self.items[index] {
-                        intermediate.push((record.clone(), similarity));
-                    }
+            let mut intermediate = Vec::new();
+            for (index, similarity) in neighbors {
+                for record in &self.items[index] {
+                    intermediate.push((record.clone(), similarity));
                 }
-                intermediate
-            })
-            .collect())
+            }
+            intermediate
+        })
     }
 
     /// Query the index with top-k nearest neighbors.
@@ -99,33 +96,21 @@ impl Index {
         k: usize,
         vectors_are_in_index: bool,
     ) -> Result<Vec<SingleQueryResult>> {
-        if self.vectors.is_empty() {
-            return Ok(vec![(Vec::new(), Vec::new()); vectors.len()]);
-        }
-        validate_query_dims(vectors, self.vectors[0].len())?;
+        self.similarity_batches(vectors, |query_index, row| {
+            let mut neighbors: Vec<(usize, f32)> = row.iter().copied().enumerate().collect();
+            if vectors_are_in_index && query_index < neighbors.len() {
+                neighbors.swap_remove(query_index);
+            }
 
-        let offset = usize::from(vectors_are_in_index);
-        Ok(vectors
-            .par_iter()
-            .map(|query| {
-                let mut neighbors: Vec<(usize, f32)> = self
-                    .vectors
-                    .iter()
-                    .enumerate()
-                    .map(|(index, vector)| (index, cosine_similarity(query, vector)))
-                    .collect();
-                let take = k.saturating_add(offset).min(neighbors.len());
-                trim_top_k(&mut neighbors, take);
-                let sliced = if offset > 0 && take > 0 {
-                    &neighbors[offset..take]
-                } else {
-                    &neighbors[..take]
-                };
-                let indices = sliced.iter().map(|(index, _)| *index).collect();
-                let similarities = sliced.iter().map(|(_, similarity)| *similarity).collect();
-                (indices, similarities)
-            })
-            .collect())
+            let take = k.min(neighbors.len());
+            trim_top_k(&mut neighbors, take);
+            let indices = neighbors.iter().map(|(index, _)| *index).collect();
+            let similarities = neighbors
+                .iter()
+                .map(|(_, similarity)| *similarity)
+                .collect();
+            (indices, similarities)
+        })
     }
 
     /// Compute the mean similarity of the top-k nearest neighbors for each
@@ -136,39 +121,89 @@ impl Index {
         k: usize,
         vectors_are_in_index: bool,
     ) -> Result<Vec<f32>> {
-        if self.vectors.is_empty() {
-            return Ok(vec![0.0; vectors.len()]);
-        }
-        validate_query_dims(vectors, self.vectors[0].len())?;
+        let take = k.min(
+            self.vectors
+                .len()
+                .saturating_sub(usize::from(vectors_are_in_index)),
+        );
 
-        let offset = usize::from(vectors_are_in_index);
-        let take = k.min(self.vectors.len().saturating_sub(offset));
+        self.similarity_batches(vectors, |query_index, row| {
+            if take == 0 {
+                return 0.0;
+            }
 
-        Ok(vectors
-            .par_iter()
-            .enumerate()
-            .map(|(query_index, query)| {
-                if take == 0 {
-                    return 0.0;
+            let mut best = Vec::with_capacity(take);
+            for (index, similarity) in row.iter().copied().enumerate() {
+                if vectors_are_in_index && index == query_index {
+                    continue;
                 }
+                push_top_similarity(&mut best, similarity, take);
+            }
 
-                let mut best = Vec::with_capacity(take);
-                for (index, vector) in self.vectors.iter().enumerate() {
-                    if vectors_are_in_index && index == query_index {
-                        continue;
-                    }
-                    let similarity = cosine_similarity(query, vector);
-                    push_top_similarity(&mut best, similarity, take);
-                }
-
-                if best.is_empty() {
-                    0.0
-                } else {
-                    best.iter().copied().sum::<f32>() / best.len() as f32
-                }
-            })
-            .collect())
+            if best.is_empty() {
+                0.0
+            } else {
+                best.iter().copied().sum::<f32>() / best.len() as f32
+            }
+        })
     }
+
+    fn similarity_batches<T, F>(&self, vectors: &Embeddings, project: F) -> Result<Vec<T>>
+    where
+        T: Send,
+        F: Fn(usize, &[f32]) -> T + Send + Sync,
+    {
+        if self.vectors.is_empty() {
+            return Ok(Vec::new());
+        }
+        validate_query_dims(vectors, self.dimensions)?;
+
+        let corpus = ArrayView2::from_shape(
+            (self.vectors.len(), self.dimensions),
+            self.normalized_vectors.as_slice(),
+        )
+        .expect("normalized corpus shape should be valid");
+
+        const QUERY_BATCH_SIZE: usize = 128;
+
+        let batches: Vec<Vec<T>> = vectors
+            .par_chunks(QUERY_BATCH_SIZE)
+            .enumerate()
+            .map(|(batch_index, chunk)| {
+                let start_index = batch_index * QUERY_BATCH_SIZE;
+                let query_flat = flatten_normalized_vectors(chunk, self.dimensions);
+                let query_matrix =
+                    ArrayView2::from_shape((chunk.len(), self.dimensions), query_flat.as_slice())
+                        .expect("normalized query shape should be valid");
+
+                let mut similarities = Array2::<f32>::zeros((chunk.len(), self.vectors.len()));
+                general_mat_mul(1.0, &query_matrix, &corpus.t(), 0.0, &mut similarities);
+
+                similarities
+                    .outer_iter()
+                    .enumerate()
+                    .map(|(local_index, row)| {
+                        let row = row
+                            .as_slice()
+                            .expect("similarity rows should be contiguous");
+                        project(start_index + local_index, row)
+                    })
+                    .collect()
+            })
+            .collect();
+
+        Ok(batches.into_iter().flatten().collect())
+    }
+}
+
+fn flatten_normalized_vectors(vectors: &[Vec<f32>], dimensions: usize) -> Vec<f32> {
+    let mut flat = Vec::with_capacity(vectors.len() * dimensions);
+    for vector in vectors {
+        let mut normalized = vector.clone();
+        normalize(&mut normalized);
+        flat.extend(normalized);
+    }
+    flat
 }
 
 fn validate_query_dims(vectors: &Embeddings, expected_cols: usize) -> Result<()> {
