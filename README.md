@@ -2,6 +2,9 @@
 
 A strict Rust port of the public API shape of [`MinishLab/semhash`](https://github.com/MinishLab/semhash): semantic deduplication, outlier filtering, and representative sample selection.
 
+This repository keeps the Rust port, parity harness, and repo-hygiene checks
+in one place so the published docs and metadata remain CI-safe.
+
 The Python package exposes `SemHash.from_records`, `SemHash.from_embeddings`, `deduplicate`, `self_deduplicate`, `filter_outliers`, `self_filter_outliers`, `find_representative`, `self_find_representative`, `DeduplicationResult`, `DuplicateRecord`, `SelectedWithDuplicates`, `FilterResult`, `Index`, and helper modules. This crate mirrors those names and behaviors using Rust types.
 
 ## Important Rust differences
@@ -130,7 +133,28 @@ let semhash = SemHash::from_records(
 ## Test
 
 ```bash
-cargo test
+cargo build --release
+cargo test --release
+python3 scripts/verify_repo_hygiene.py
 ```
 
 The included tests cover deduplication, cross-dataset deduplication, multi-column records, exact duplicate grouping, result inspection, rethresholding, outlier filtering, representative sampling, `from_embeddings`, and utility semantics.
+
+## Reference benchmark
+
+The cross-repo parity benchmark requires an explicit Python checkout instead of
+assuming a machine-local directory:
+
+```bash
+python3 scripts/benchmark_reference_parity.py --reference-repo ../semhash
+```
+
+You can also set `SEMHASH_REFERENCE_REPO` in the environment and omit the
+flag.
+
+## License
+
+This repository is licensed under ISC. See [LICENSE](LICENSE).
+
+The bundled third-party license text is in
+[THIRD_PARTY_LICENSE](THIRD_PARTY_LICENSE).

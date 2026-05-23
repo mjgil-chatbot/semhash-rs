@@ -2,10 +2,10 @@
 name = "semhash-rs"
 version = "0.4.1"
 edition = "2021"
-authors = ["Port generated for MinishLab/semhash API compatibility"]
+authors = ["Malcom Gilbert"]
 description = "Strict Rust port of SemHash: semantic deduplication, outlier filtering, and representative sampling."
 license = "ISC"
-repository = "https://github.com/MinishLab/semhash"
+repository = "https://github.com/mjgil/semhash-rs"
 readme = "README.md"
 keywords = ["semhash", "deduplication", "embeddings", "similarity", "rust"]
 categories = ["algorithms", "science", "text-processing"]

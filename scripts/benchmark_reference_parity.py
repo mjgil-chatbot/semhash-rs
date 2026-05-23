@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -45,8 +46,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--reference-repo",
-        default="/home/m/git/others/semhash",
-        help="Path to the Python semhash reference repository.",
+        default=None,
+        help="Path to the Python semhash reference repository. May also be set via SEMHASH_REFERENCE_REPO.",
     )
     parser.add_argument(
         "--rust-binary",
@@ -61,7 +62,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    reference_repo = Path(args.reference_repo).resolve()
+    reference_repo = resolve_reference_repo(args.reference_repo)
     rust_binary = Path(args.rust_binary).resolve()
     cases = [parse_case(case) for case in args.case] or [Case(*case) for case in DEFAULT_CASES]
 
@@ -85,6 +86,17 @@ def main() -> int:
         print(format_row(case, rust_result["timings_ms"], python_result["timings_ms"]), flush=True)
 
     return 0
+
+
+def resolve_reference_repo(arg_value: str | None) -> Path:
+    if arg_value:
+        return Path(arg_value).resolve()
+    raw_env = os.environ.get("SEMHASH_REFERENCE_REPO")
+    if raw_env:
+        return Path(raw_env).resolve()
+    raise SystemExit(
+        "Python reference repo not configured. Pass --reference-repo or set SEMHASH_REFERENCE_REPO."
+    )
 
 
 def parse_case(value: str) -> Case:

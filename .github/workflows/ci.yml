@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify repo hygiene
+        run: python3 scripts/verify_repo_hygiene.py
+      - name: Build release
+        run: cargo build --release
+      - name: Run release tests
+        run: cargo test --release

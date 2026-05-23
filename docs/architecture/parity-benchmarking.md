@@ -57,7 +57,8 @@ Dictionary-record parity continues to be covered in the Rust integration tests b
 ## Running
 
 1. Build the Rust benchmark example in release mode.
-2. Run `scripts/benchmark_reference_parity.py` and point it at the Python reference checkout if needed.
+2. Run `scripts/benchmark_reference_parity.py` and pass `--reference-repo` or
+   set `SEMHASH_REFERENCE_REPO` to identify the Python reference checkout.
 
 The script rejects the run if any benchmark scenario produces divergent outputs between the two implementations.
 
