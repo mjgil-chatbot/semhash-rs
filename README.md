@@ -1,4 +1,3 @@
-# Semhash-RS
 
 <h2 align="center">
   <img width="30%" alt="semhash-rs logo" src="imgs/semhash_rs_logo.png"><br/>
