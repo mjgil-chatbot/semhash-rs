@@ -1,4 +1,10 @@
-# semhash-rs
+# Semhash-RS
+
+<h2 align="center">
+  <img width="30%" alt="semhash-rs logo" src="imgs/semhash_rs_logo.png"><br/>
+  Fast Semantic Hashing for Code Search<br/>
+  <sub>Rust implementation of Semantic Hashing</sub>
+</h2>
 
 A strict Rust port of the public API shape of [`MinishLab/semhash`](https://github.com/MinishLab/semhash): semantic deduplication, outlier filtering, and representative sample selection.
 
